@@ -2,6 +2,7 @@ import cv2
 import json
 import os
 import argparse
+import sys
 
 
 class RangeDetector:
@@ -25,7 +26,9 @@ class RangeDetector:
             if cv2.waitKey(1) & 0xFF is ord('l'):
                 self.vid.loadSliderValues()
             if cv2.waitKey(1) & 0xFF is ord('q'):
-                break
+                self.vid.release()
+                cv2.destroyAllWindows()
+                sys.exit()
 
     def get_arguments(self):
         ap = argparse.ArgumentParser()
@@ -118,6 +121,9 @@ class VideoCapture:
 
             for j in range_filter:
                 cv2.createTrackbar("%s_%s" % (j, i), "Trackbars", v, 255, self.callback)
+
+    def release(self):
+        self.camera.release()
 
 
 if __name__ == '__main__':
