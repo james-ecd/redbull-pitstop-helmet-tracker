@@ -25,6 +25,7 @@ class Calibrate:
     def selectROI(self, frame):
         print('')
         r = cv2.selectROI(frame)
+        print(r)
         return r
 
     def saveToFile(self, roi):

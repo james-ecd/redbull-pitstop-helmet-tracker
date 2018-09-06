@@ -7,20 +7,18 @@ import time
 import uuid
 
 
-class GameManager:
-
-    def __init__(self):
-        self.firstRun = True
-
-
-
 class Helmet:
 
-    def __init__(self, uid, center, radius, label):
+    def __init__(self, uid, center, x, y, radius, label):
         self.uuid = uid
+        self.center = center
+        self.x = x
+        self.y = y
+        self.radius = radius
+        self.label = label
         self.centerX = center[0]
         self.centerY = center[1]
-        self.radius = radius
+        self.saved = None
 
     def __eq__(self, other):
         return self.centerX == other.centerX and self.centerY == other.centerY
@@ -28,18 +26,41 @@ class Helmet:
     def __hash__(self):
         return hash(self.uuid)
 
-    def isBall(self, newCenter):
-        mg = 20
-        if missing:
-            return self.centerX - mg <= newCenter[0] <= self.centerX + mg and self.centerY - mg <= newCenter[1] <= self.centerY + mg
-        return self.centerX-2 <= newCenter[0] <= self.centerX+2 and self.centerY-2 <= newCenter[1] <= self.centerY+2
+    @property
+    def hasMoved(self):
+        if self.savedX:
+            return not (self.centerX == self.savedX and self.centerY == self.savedY)
+        else:
+            return False
 
-    def update(self, center):
+    def distanceFromLastRecorded(self, center):
+        return [abs(self.centerX - center[0]), abs(self.centerY - center[1])]
+
+    def distanceFromLastSaved(self, center):
+        return abs(self.savedX - center[0]), abs(self.savedY - center[1])
+
+    def isHelmet(self, center):
+        return self.centerX == center[0] and self.centerY == center[1]
+
+    def savePosition(self):
+        self.saved = Helmet(self.uuid, self.center, self.x, self.y, self.radius, self.label)
+
+    def update(self, center, x, y, radius):
+        self.center = center
+        self.x = x
+        self.y = y
+        self.radius = radius
         self.centerX = center[0]
         self.centerY = center[1]
 
 
-class Game:
+class Tracker:
+
+    MATCHING_METHODS = [cv2.TM_CCOEFF, cv2.TM_CCOEFF_NORMED, cv2.TM_CCORR,
+                        cv2.TM_CCORR_NORMED, cv2.TM_SQDIFF, cv2.TM_SQDIFF_NORMED]
+
+    HELMET_LABELS = ['Barry', 'Lella', 'David', 'Annie', 'Paul', 'Tim', 'Gary', 'Sophie', 'Max', 'Daniel', 'Juan',
+                     'James', 'Andy', 'Lewis', 'Jeroen', 'Formaggio', 'Jess']
 
     def getArguments(self):
         ap = argparse.ArgumentParser()
@@ -47,11 +68,15 @@ class Game:
                         help='Use live video source', action='store_true')
         ap.add_argument('-v', '--video', required=False,
                         help='Use pre-recorded video source')
-        ap.add_argument('-d', '--debug', required=False,
-                        help='Toggles debugging features (shows masks etc)', action='store_true')
         ap.add_argument('-r', '--roi', required=False,
                         help='Uses the region of interest specified in the setting.json file (generated with config script)',
                         action='store_true')
+        ap.add_argument('-t', '--template', required=False,
+                        help='Name of the template to use for tracking')
+        ap.add_argument('-m', '--method', required=False,
+                        help='Method to use in template matching')
+        ap.add_argument('-d', '--debug', required=False,
+                        help='Toggles debugging features (shows masks etc)', action='store_true')
         args = vars(ap.parse_args())
 
         # TODO - Add checks for file extensions
@@ -68,44 +93,92 @@ class Game:
         self.helmetHigher = tuple(self.helmet[3:])
         self.args = self.getArguments()
         self.debug = self.args['debug']
-        self.gameManager = GameManager()
         self.firstRun = True
+        self.template = self.args.get('template', False)
+        self.method = self.args.get('method', False)
+        self.helmets = {}
+        self.saved = False
 
     def findHelmets(self, frame, mask, label):
-        labelColours = {'white': (225, 225, 225), 'black': (0, 0, 0), 'yellow': (225, 225, 0), 'red': (0, 0, 225)}
         cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
                                 cv2.CHAIN_APPROX_SIMPLE)
         cnts = cnts[0] if imutils.is_cv2() else cnts[1]
-        center = None
+
+        helmets = list(self.helmets.values())
+        extraHelmets = []
 
         if len(cnts) > 0:
+            count = 0
             for c in cnts:
                 ((x, y), radius) = cv2.minEnclosingCircle(c)
                 M = cv2.moments(c)
                 center = (int(M["m10"] / M["m00"])+1, int(M["m01"] / M["m00"])+1)
 
-                if 20 < radius:
-                    self.drawCircle(frame, center, x, y, radius, label)
+                if 5 < radius:
+                    if self.firstRun:
+                        uid = str(uuid.uuid4())
+                        self.helmets[uid] = Helmet(uid, center, x, y, radius, self.HELMET_LABELS[count])
+                    else:
+                        for h in helmets:
+                            if h.isHelmet(center):
+                                # Helmet found, remove from running list of unfound helmets and draw on frame
+                                helmets = [i for i in helmets if i.uuid != h.uuid]
+                                self.drawCircle(frame, center, x, y, radius, h.label)
+                                break
+                        else:
+                            # No helmet found with exact position
+                            extraHelmets.append([center, x, y, radius])
+                    count += 1
+            if extraHelmets:
+                # Some helmets have moved. Lets match them and draw the necessary extras
+                for h in extraHelmets:
+                    distances = [(leftOver.uuid, leftOver.distanceFromLastRecorded(h[0])) for leftOver in helmets]
+                    helmetMatch = min(distances, key=lambda i: i[1][0] + i[1][1])
+                    helmets = [h for h in helmets if h.uuid != helmetMatch[0]]
+                    print("Moved helmet detected and match with a x, y change of {}, {}".format(helmetMatch[1][0], helmetMatch[1][0]))
+                    self.drawMovedHelmet(frame, self.helmets[helmetMatch[0]], h[0], h[0], h[0], h[0])
+                    self.helmets[helmetMatch[0]].update(h[0], h[1], h[2], h[3])
+            if self.firstRun:
+                self.firstRun = False
 
-    def drawCircle(self, frame, center, x, y, radius, label):
+    def drawCircle(self, frame, center, x, y, radius, label, colour=(0,0,0)):
         if self.args.get('roi'):
             r = self.roi
             cv2.circle(frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])], (int(x), int(y)), int(radius),
-                       (0, 255, 255), 2)
-            cv2.circle(frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])], center, 5, (0, 0, 255), -1)
+                       colour, 2)
+            cv2.circle(frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])], center, 5, (0, 100, 255), -1)
             cv2.putText(frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])], label, (center[0] + 10, center[1]),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
         else:
             cv2.circle(frame, (int(x), int(y)), int(radius), (0, 255, 255), 2)
             cv2.circle(frame, center, 5, (0, 0, 255), -1)
-            cv2.putText(frame, label, (center[0] + 10, center[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+            cv2.putText(frame, label, (center[0] + 10, center[1]), cv2.FONT_HERSHEY_SIMPLEX, 200, (0, 0, 255), 1)
+
+    # TODO: add save position functionality (toggle self.saved), draw lind from incorrect to saved, bounding boxes
+
+    def drawMovedHelmet(self, frame, helmet, center, x, y, radius):
+        if self.saved:
+            self.drawCircle(frame, center, x, y, radius, '{} INCORRECT POSITION'.format(helmet.label))
+            self.drawCircle(frame, helmet.saved.center, helmet.saved.x, helmet.saved.y, helmet.saved.radius,
+                            '{} CORRECT POSITION'.format(helmet.label))
+        else:
+            self.drawCircle(frame, center, x, y, radius, helmet.label)
+
+    def findLogo(self, frame_rgb, method):
+        template = cv2.imread(self.template, 0)
+        frame_gray = cv2.cvtColor(frame_rgb, cv2.COLOR_BGR2GRAY)
+        w, h = template.shape[::-1]
+
+        res = cv2.matchTemplate(frame_rgb, template, self.MATCHING_METHODS[int(method)])
+        threshold = 0.8
+        loc = np.where(res >= threshold)
+        for pt in zip(*loc[::-1]):
+            cv2.rectangle(frame_rgb, pt, (pt[0] + w, pt[1] + h), (0, 0, 255), 2)
 
 
     def processFrame(self, frame):
         frame = imutils.resize(frame, width=800)
         originialFrame = frame.copy()
-        #kernel = np.ones((15, 15), np.float32) / 225
-        #smoothed = cv2.filter2D(frame, -1, kernel)
         blur = cv2.GaussianBlur(frame, (15, 15), 0)
         r = self.roi
 
@@ -129,7 +202,12 @@ class Game:
 
         cv2.imshow("mask", helmetMask)
 
-        self.findHelmets(frame, helmetMask, 'CREW')
+        if self.template and self.method:
+            self.findLogo(frame, self.method)
+        #elif self.template ^ self.method:
+            #raise Exception("Only one of template/method given. Both are required")
+        else:
+            self.findHelmets(frame, helmetMask, 'CREW')
 
         if self.debug:
             cv2.imshow("Helmet", helmetMask)
@@ -181,5 +259,5 @@ class Game:
 
 
 if __name__ == '__main__':
-    game = Game()
-    game.run()
+    tracker = Tracker()
+    tracker.run()

@@ -63,8 +63,6 @@ class VideoCapture:
         self.args = args
         self.range_filter = self.args['filter'].upper()
         self.camera = source
-        self.width = self.camera.get(cv2.CAP_PROP_FRAME_WIDTH)
-        self.height = self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT)
         self.setup_trackbars(self.range_filter)
 
     def getFrame(self):
