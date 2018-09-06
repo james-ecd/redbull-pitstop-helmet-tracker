@@ -175,6 +175,7 @@ class Tracker:
             self.drawCircle(frame, center, x, y, radius, '{} INCORRECT POSITION'.format(helmet.label), colour=(0,0,255))
             self.drawCircle(frame, helmet.saved.center, helmet.saved.x, helmet.saved.y, helmet.saved.radius,
                             '{} CORRECT POSITION'.format(helmet.label), colour=(0,0,255))
+            cv2.line(frame, helmet.saved.center, center, (0,0,0), 3)
         else:
             self.drawCircle(frame, center, x, y, radius, helmet.label)
 
@@ -217,7 +218,7 @@ class Tracker:
 
         helmetMask = cv2.inRange(helmetFilter, self.helmetLower, self.helmetHigher)
 
-        helmetMask = cv2.erode(helmetMask, None, iterations=2)
+        helmetMask = cv2.erode(helmetMask, None, iterations=5)
         helmetMask = cv2.dilate(helmetMask, None, iterations=2)
 
         if self.debug: cv2.imshow("mask", helmetMask)
