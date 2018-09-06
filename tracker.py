@@ -19,6 +19,7 @@ class Helmet:
         self.centerX = center[0]
         self.centerY = center[1]
         self.saved = None
+        self.accuracy = 15
 
     def __eq__(self, other):
         return self.centerX == other.centerX and self.centerY == other.centerY
@@ -28,8 +29,9 @@ class Helmet:
 
     @property
     def hasMoved(self):
-        if self.savedX:
-            return not (self.centerX == self.savedX and self.centerY == self.savedY)
+        if self.saved:
+            return not (self.centerX - self.accuracy < self.saved.center[0] < self.centerX + self.accuracy and
+                        self.centerY - self.accuracy < self.saved.center[1] < self.centerY + self.accuracy)
         else:
             return False
 
@@ -37,10 +39,11 @@ class Helmet:
         return [abs(self.centerX - center[0]), abs(self.centerY - center[1])]
 
     def distanceFromLastSaved(self, center):
-        return abs(self.savedX - center[0]), abs(self.savedY - center[1])
+        return abs(self.saved.center[0] - center[0]), abs(self.saved.center[1] - center[1])
 
     def isHelmet(self, center):
-        return self.centerX - 5 < center[0] < self.centerX + 5 and self.centerY - 5 < center[1] < self.centerY + 5
+        return self.centerX - self.accuracy < center[0] < self.centerX + self.accuracy\
+               and self.centerY - self.accuracy < center[1] < self.centerY + self.accuracy
 
     def savePosition(self):
         self.saved = Helmet(self.uuid, self.center, self.x, self.y, self.radius, self.label)
@@ -106,13 +109,11 @@ class Tracker:
         cnts = cnts[0] if imutils.is_cv2() else cnts[1]
 
         helmets = list(self.helmets.values())
-        print(self.helmets.values())
         extraHelmets = []
 
         if len(cnts) > 0:
             count = 0
             for c in cnts:
-                print("len(cnts) = {}; len(helmets) = {}".format(len(cnts), len(helmets)))
                 ((x, y), radius) = cv2.minEnclosingCircle(c)
                 M = cv2.moments(c)
                 center = (int(M["m10"] / M["m00"])+1, int(M["m01"] / M["m00"])+1)
@@ -122,49 +123,46 @@ class Tracker:
                         if self.firstRun:
                             uid = str(uuid.uuid4())
                             self.helmets[uid] = Helmet(uid, center, x, y, radius, self.HELMET_LABELS[count])
-                            if self.debug: print("{} created".format(self.HELMET_LABELS[count]))
                         else:
-                            if self.debug: print([h.label for h in helmets])
                             for h in helmets:
                                 if h.isHelmet(center):
+                                    if h.hasMoved:
+                                        self.drawMovedHelmet(frame, h, center, x, y, radius)
+                                    else:
+                                        self.drawCircle(frame, center, x, y, radius, h.label)
                                     # Helmet found, remove from running list of unfound helmets and draw on frame
                                     helmets = [i for i in helmets if i.uuid != h.uuid]
-                                    self.drawCircle(frame, center, x, y, radius, h.label)
-                                    if self.debug: print("{} reached break so should delete itself".format(h.label))
                                     break
                             else:
                                 # No helmet found with exact position
-                                if self.debug: print("{} hit else".format(h.label))
                                 extraHelmets.append([center, x, y, radius])
                     else:
                         self.drawCircle(frame, center, x, y, radius, "")
                     count += 1
             if extraHelmets:
                 # Some helmets have moved. Lets match them and draw the necessary extras
-                if self.debug: print("Helmets: {}".format(helmets))
-                if self.debug: print("len: {} => Extra Helmets: {}".format(len(extraHelmets), extraHelmets))
                 for h in extraHelmets:
-                    if self.debug: print(h)
-                    distances = [(leftOver.uuid, leftOver.distanceFromLastRecorded(h[0])) for leftOver in helmets]
-                    if self.debug: print(distances)
-                    helmetMatch = min(distances, key=lambda i: i[1][0] + i[1][1])
-                    if self.debug: print('{}'.format(helmetMatch[0]))
-                    helmets = [i for i in helmets if i.uuid != helmetMatch[0]]
-                    print("Moved helmet detected and match with a x, y change of {}, {}".format(helmetMatch[1][0], helmetMatch[1][1]))
-                    self.drawMovedHelmet(frame, self.helmets[helmetMatch[0]], h[0], h[1], h[2], h[3])
-                    self.helmets[helmetMatch[0]].update(h[0], h[1], h[2], h[3])
+                    try:
+                        distances = [(leftOver.uuid, leftOver.distanceFromLastRecorded(h[0])) for leftOver in helmets]
+                        helmetMatch = min(distances, key=lambda i: i[1][0] + i[1][1])
+                        helmets = [i for i in helmets if i.uuid != helmetMatch[0]]
+                        print("Moved helmet detected and match with a x, y change of {}, {}".format(helmetMatch[1][0], helmetMatch[1][1]))
+                        self.drawMovedHelmet(frame, self.helmets[helmetMatch[0]], h[0], h[1], h[2], h[3])
+                        self.helmets[helmetMatch[0]].update(h[0], h[1], h[2], h[3])
+                    except Exception as e:
+                        print("Cnts => helmet mismatch")
             if self.begin and self.firstRun:
                 self.firstRun = False
-            print('\n\n\n')
 
-    def drawCircle(self, frame, center, x, y, radius, label, colour=(0,0,0)):
+    def drawCircle(self, frame, center, x, y, radius, label, centerOnly=False, colour=(0,255,0)):
         if self.args.get('roi'):
             r = self.roi
-            cv2.circle(frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])], (int(x), int(y)), int(radius),
-                       colour, 2)
-            cv2.circle(frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])], center, 5, (0, 100, 255), -1)
+            if not centerOnly:
+                cv2.circle(frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])], (int(x), int(y)), int(radius),
+                            colour, 2)
+            cv2.circle(frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])], center, 5, (0, 0, 0), -1)
             cv2.putText(frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])], label, (center[0] + 10, center[1]),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, colour, 3)
         else:
             cv2.circle(frame, (int(x), int(y)), int(radius), (0, 255, 255), 2)
             cv2.circle(frame, center, 5, (0, 0, 255), -1)
@@ -174,9 +172,9 @@ class Tracker:
 
     def drawMovedHelmet(self, frame, helmet, center, x, y, radius):
         if self.saved:
-            self.drawCircle(frame, center, x, y, radius, '{} INCORRECT POSITION'.format(helmet.label))
+            self.drawCircle(frame, center, x, y, radius, '{} INCORRECT POSITION'.format(helmet.label), colour=(0,0,255))
             self.drawCircle(frame, helmet.saved.center, helmet.saved.x, helmet.saved.y, helmet.saved.radius,
-                            '{} CORRECT POSITION'.format(helmet.label))
+                            '{} CORRECT POSITION'.format(helmet.label), colour=(0,0,255))
         else:
             self.drawCircle(frame, center, x, y, radius, helmet.label)
 
@@ -199,7 +197,7 @@ class Tracker:
 
 
     def processFrame(self, frame):
-        frame = imutils.resize(frame, width=800)
+        frame = imutils.resize(frame, width=1200)
         originialFrame = frame.copy()
         blur = cv2.GaussianBlur(frame, (15, 15), 0)
         r = self.roi
@@ -222,7 +220,7 @@ class Tracker:
         helmetMask = cv2.erode(helmetMask, None, iterations=2)
         helmetMask = cv2.dilate(helmetMask, None, iterations=2)
 
-        cv2.imshow("mask", helmetMask)
+        if self.debug: cv2.imshow("mask", helmetMask)
 
         if self.template and self.method:
             self.findLogo(frame, self.method)
@@ -247,7 +245,7 @@ class Tracker:
                 break
             frame, originialFrame = self.processFrame(frame)
             cv2.imshow("Frame", frame)
-            cv2.imshow("Original", originialFrame)
+            if self.debug: cv2.imshow("Original", originialFrame)
             key = cv2.waitKey(1) & 0xFF
 
             if key == ord("q"):
@@ -263,7 +261,7 @@ class Tracker:
             ret, frame = camera.read()
             frame, originialFrame = self.processFrame(frame)
             cv2.imshow("Frame", frame)
-            cv2.imshow("Original", originialFrame)
+            if self.debug: cv2.imshow("Original", originialFrame)
             key = cv2.waitKey(1) & 0xFF
 
             if key == ord("s"):
