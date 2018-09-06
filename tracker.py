@@ -36,10 +36,11 @@ class Helmet:
             return False
 
     def distanceFromLastRecorded(self, center):
-        return [abs(self.centerX - center[0]), abs(self.centerY - center[1])]
+        return [self.centerX - center[0], self.centerY - center[1]]
 
-    def distanceFromLastSaved(self, center):
-        return abs(self.saved.center[0] - center[0]), abs(self.saved.center[1] - center[1])
+    @property
+    def distanceFromLastSaved(self):
+        return [abs(self.saved.center[0] - self.center[0]), abs(self.saved.center[1] - self.center[1])]
 
     def isHelmet(self, center):
         return self.centerX - self.accuracy < center[0] < self.centerX + self.accuracy\
@@ -151,33 +152,44 @@ class Tracker:
                         self.helmets[helmetMatch[0]].update(h[0], h[1], h[2], h[3])
                     except Exception as e:
                         print("Cnts => helmet mismatch")
+                        #raise e
             if self.begin and self.firstRun:
                 self.firstRun = False
 
     def drawCircle(self, frame, center, x, y, radius, label, centerOnly=False, colour=(0,255,0)):
-        if self.args.get('roi'):
-            r = self.roi
-            if not centerOnly:
-                cv2.circle(frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])], (int(x), int(y)), int(radius),
-                            colour, 2)
-            cv2.circle(frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])], center, 5, (0, 0, 0), -1)
-            cv2.putText(frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])], label, (center[0] + 10, center[1]),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, colour, 3)
-        else:
-            cv2.circle(frame, (int(x), int(y)), int(radius), (0, 255, 255), 2)
-            cv2.circle(frame, center, 5, (0, 0, 255), -1)
-            cv2.putText(frame, label, (center[0] + 10, center[1]), cv2.FONT_HERSHEY_SIMPLEX, 200, (0, 0, 255), 1)
+        if not centerOnly:
+            cv2.circle(frame, (int(x), int(y)), int(radius), colour, 2)
+        cv2.circle(frame, center, 5, (0, 0, 255), -1)
+        cv2.putText(frame, label, (center[0] + 10, center[1]), cv2.FONT_HERSHEY_SIMPLEX, 1, colour, 3)
 
-    # TODO: add save position functionality (toggle self.saved), draw lind from incorrect to saved, bounding boxes
+    # TODO: bounding boxes
 
     def drawMovedHelmet(self, frame, helmet, center, x, y, radius):
         if self.saved:
             self.drawCircle(frame, center, x, y, radius, '{} INCORRECT POSITION'.format(helmet.label), colour=(0,0,255))
             self.drawCircle(frame, helmet.saved.center, helmet.saved.x, helmet.saved.y, helmet.saved.radius,
-                            '{} CORRECT POSITION'.format(helmet.label), colour=(0,0,255))
-            cv2.line(frame, helmet.saved.center, center, (0,0,0), 3)
+                            '{} CORRECT POSITION'.format(helmet.label), colour=(0,255,0))
+            self.drawGuidline(frame, helmet, center)
         else:
-            self.drawCircle(frame, center, x, y, radius, helmet.label)
+            self.drawCircle(frame, center, x, y, radius, helmet.label, colour=(0,255,0))
+
+    def drawGuidline(self, frame, helmet, center):
+        cv2.line(frame, helmet.saved.center, center, (0, 0, 0), 3)
+        dist = helmet.distanceFromLastSaved
+        lineXNegative = (helmet.saved.center[0] - center[0]) < 0
+        lineYNegative = (helmet.saved.center[1] - center[1]) < 0
+        lineCenterX = int(((helmet.saved.center[0] + center[0]) / 2) + 10)
+        lineCenterY = int(((helmet.saved.center[1] + center[1]) / 2) - 10)
+        if lineXNegative:
+            promtX = "{}mm right".format(dist[0])
+        else:
+            promtX = "{}mm left".format(dist[0])
+        if lineYNegative:
+            promtY = "{}mm down".format(dist[1])
+        else:
+            promtY = "{}mm up".format(dist[1])
+        cv2.putText(frame, "({},{})".format(promtX, promtY), (lineCenterX, lineCenterY),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
     def saveHelmetPositions(self):
         for h in self.helmets.values():
@@ -199,26 +211,23 @@ class Tracker:
 
     def processFrame(self, frame):
         frame = imutils.resize(frame, width=1200)
+        if self.args.get('roi'):
+            r = self.roi
+            frame = frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])]
         originialFrame = frame.copy()
         blur = cv2.GaussianBlur(frame, (15, 15), 0)
         r = self.roi
 
         if self.hsv:
-            if self.args.get('roi'):
-                helmetFilter = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV).copy()[int(r[1]):int(r[1]+r[3]), int(r[0]):int(r[0]+r[2])]
-            else:
-                helmetFilter = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV).copy()
+            helmetFilter = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV).copy()
         elif self.rgb:
-            if self.args.get('roi'):
-                helmetFilter = blur.copy()[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])]
-            else:
-                helmetFilter = blur.copy()
+            helmetFilter = blur.copy()
         else:
             raise NotImplementedError('Only HSV or RGB filters are supported. Please use one of these')
 
         helmetMask = cv2.inRange(helmetFilter, self.helmetLower, self.helmetHigher)
 
-        helmetMask = cv2.erode(helmetMask, None, iterations=5)
+        helmetMask = cv2.erode(helmetMask, None, iterations=4)
         helmetMask = cv2.dilate(helmetMask, None, iterations=2)
 
         if self.debug: cv2.imshow("mask", helmetMask)
