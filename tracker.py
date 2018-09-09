@@ -20,6 +20,7 @@ class Helmet:
         self.centerY = center[1]
         self.saved = None
         self.accuracy = 15
+        self.strayDistance = 50
 
     def __eq__(self, other):
         return self.centerX == other.centerX and self.centerY == other.centerY
@@ -41,6 +42,10 @@ class Helmet:
     @property
     def distanceFromLastSaved(self):
         return [abs(self.saved.center[0] - self.center[0]), abs(self.saved.center[1] - self.center[1])]
+
+    def verifyNewDistance(self, center):
+        return self.centerX - self.strayDistance < center[0] < self.centerX + self.strayDistance and \
+               self.centerY - self.strayDistance < center[1] < self.centerY + self.strayDistance
 
     def isHelmet(self, center):
         return self.centerX - self.accuracy < center[0] < self.centerX + self.accuracy\
@@ -147,12 +152,13 @@ class Tracker:
                 # Some helmets have moved. Lets match them and draw the necessary extras
                 for h in extraHelmets:
                     try:
-                        distances = [(leftOver.uuid, leftOver.distanceFromLastRecorded(h[0])) for leftOver in helmets]
+                        distances = [(leftOver, leftOver.distanceFromLastRecorded(h[0])) for leftOver in helmets]
                         helmetMatch = min(distances, key=lambda i: i[1][0] + i[1][1])
-                        helmets = [i for i in helmets if i.uuid != helmetMatch[0]]
-                        print("Moved helmet detected and match with a x, y change of {}, {}".format(helmetMatch[1][0], helmetMatch[1][1]))
-                        self.drawMovedHelmet(frame, self.helmets[helmetMatch[0]], h[0], h[1], h[2], h[3])
-                        self.helmets[helmetMatch[0]].update(h[0], h[1], h[2], h[3])
+                        if helmetMatch[0].verifyNewDistance(h[0]):
+                            helmets = [i for i in helmets if i.uuid != helmetMatch[0].uuid]
+                            print("Moved helmet detected and match with a x, y change of {}, {}".format(helmetMatch[1][0], helmetMatch[1][1]))
+                            self.drawMovedHelmet(frame, self.helmets[helmetMatch[0].uuid], h[0], h[1], h[2], h[3])
+                            self.helmets[helmetMatch[0].uuid].update(h[0], h[1], h[2], h[3])
                     except Exception as e:
                         print("Cnts => helmet mismatch")
                         #raise e
@@ -254,7 +260,6 @@ class Tracker:
     def video(self):
         # Ball tracking using a pre-recorded video source
         stream = cv2.VideoCapture(self.args['video'])
-        time.sleep(0.2)
 
         while True:
             grabbed, frame = stream.read()
@@ -273,7 +278,6 @@ class Tracker:
                 self.resetHelmets()
             if key == ord("q"):
                 break
-            time.sleep(0.05)
         stream.release()
 
     def live(self):
