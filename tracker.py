@@ -49,6 +49,9 @@ class Helmet:
     def savePosition(self):
         self.saved = Helmet(self.uuid, self.center, self.x, self.y, self.radius, self.label)
 
+    def resetSaved(self):
+        self.saved.update(self.center, self.x, self.y, self.radius)
+
     def update(self, center, x, y, radius):
         self.center = center
         self.x = x
@@ -208,6 +211,10 @@ class Tracker:
         for pt in zip(*loc[::-1]):
             cv2.rectangle(frame_rgb, pt, (pt[0] + w, pt[1] + h), (0, 0, 255), 2)
 
+    def resetHelmets(self):
+        for h in self.helmets.values():
+            h.resetSaved()
+        print('{} helmets saved positions reset'.format(len(self.helmets.values())))
 
     def processFrame(self, frame):
         frame = imutils.resize(frame, width=1200)
@@ -247,7 +254,7 @@ class Tracker:
     def video(self):
         # Ball tracking using a pre-recorded video source
         stream = cv2.VideoCapture(self.args['video'])
-        time.sleep(2.0)
+        time.sleep(0.2)
 
         while True:
             grabbed, frame = stream.read()
@@ -258,6 +265,12 @@ class Tracker:
             if self.debug: cv2.imshow("Original", originialFrame)
             key = cv2.waitKey(1) & 0xFF
 
+            if key == ord("s"):
+                self.saveHelmetPositions()
+            if key == ord("b"):
+                self.begin = True
+            if key == ord("r"):
+                self.resetHelmets()
             if key == ord("q"):
                 break
             time.sleep(0.05)
@@ -278,6 +291,8 @@ class Tracker:
                 self.saveHelmetPositions()
             if key == ord("b"):
                 self.begin = True
+            if key == ord("r"):
+                self.resetHelmets()
             if key == ord("q"):
                 break
             time.sleep(0.05)
