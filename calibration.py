@@ -52,7 +52,7 @@ class Calibrate:
         time.sleep(2.0)
 
         grabbed, frame = stream.read()
-        frame = imutils.resize(frame, width=1200)
+        frame = imutils.resize(frame, width=1500)
         self.saveToFile(self.selectROI(frame))
         print("Sucessfully updated settings.json")
 
@@ -65,7 +65,7 @@ class Calibrate:
 
         while True:
             ret, frame = camera.read()
-            frame = imutils.resize(frame, width=1200)
+            frame = imutils.resize(frame, width=1400)
             cv2.imshow("Frame", frame)
             key = cv2.waitKey(1) & 0xFF
 

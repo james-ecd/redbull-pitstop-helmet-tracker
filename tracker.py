@@ -160,7 +160,7 @@ class Tracker:
                             self.drawMovedHelmet(frame, self.helmets[helmetMatch[0].uuid], h[0], h[1], h[2], h[3])
                             self.helmets[helmetMatch[0].uuid].update(h[0], h[1], h[2], h[3])
                     except Exception as e:
-                        print("Cnts => helmet mismatch")
+                        print("Contours => helmet mismatch")
                         #raise e
             if self.begin and self.firstRun:
                 self.firstRun = False
@@ -223,7 +223,7 @@ class Tracker:
         print('{} helmets saved positions reset'.format(len(self.helmets.values())))
 
     def processFrame(self, frame):
-        frame = imutils.resize(frame, width=1200)
+        frame = imutils.resize(frame, width=1400)
         if self.args.get('roi'):
             r = self.roi
             frame = frame[int(r[1]):int(r[1] + r[3]), int(r[0]):int(r[0] + r[2])]
